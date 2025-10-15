@@ -17,7 +17,6 @@ load_dotenv()
 # Конфигурация
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 GROUP_CHAT_ID = int(os.getenv('GROUP_CHAT_ID', 0))
-REPORTS_TOPIC_ID = os.getenv('REPORTS_TOPIC_ID') or None
 DATABASE_PATH = os.getenv('DATABASE_PATH', 'reports.db')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
@@ -42,12 +41,12 @@ PARTICIPANTS = {
     '@travellove_krd': '#любовь'
 }
 
-# Типы отчетов и их дедлайны
+# Типы отчетов (теперь поддерживают номера дней)
 REPORT_TYPES = {
-    '#оу': {'name': 'Утренний отчёт', 'deadline': time(10, 0)},
-    '#ос': {'name': 'Спорт', 'deadline': time(23, 59)},
-    '#ов': {'name': 'Вечерний отчёт', 'deadline': time(23, 59)},
-    '#гсд': {'name': 'Главное событие дня', 'deadline': time(23, 59)}
+    'ос': {'name': 'Спорт', 'deadline': time(23, 59)},
+    'оу': {'name': 'Утренний отчёт', 'deadline': time(10, 0)},
+    'ов': {'name': 'Вечерний отчёт', 'deadline': time(23, 59)},
+    'гсд': {'name': 'Главное событие дня', 'deadline': time(23, 59)}
 }
 
 class ReportDatabase:
@@ -65,27 +64,26 @@ class ReportDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_tag TEXT NOT NULL,
                     report_type TEXT NOT NULL,
-                    report_date DATE NOT NULL,
-                    submission_time TIME NOT NULL,
+                    day_number INTEGER NOT NULL,
+                    datetime TEXT NOT NULL,
                     username TEXT,
                     message_id INTEGER,
-                    UNIQUE(user_tag, report_type, report_date)
+                    UNIQUE(user_tag, report_type, day_number)
                 )
             ''')
             conn.commit()
 
-    def save_report(self, user_tag: str, report_type: str, submission_time: datetime,
+    def save_report(self, user_tag: str, report_type: str, day_number: int, submission_time: datetime,
                    username: str, message_id: int):
         """Сохранение отчета в базу данных"""
-        date_str = submission_time.date().isoformat()
-        time_str = submission_time.time().isoformat()
+        dt_str = submission_time.isoformat()
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 INSERT OR REPLACE INTO reports
-                (user_tag, report_type, report_date, submission_time, username, message_id)
+                (user_tag, report_type, day_number, datetime, username, message_id)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (user_tag, report_type, date_str, time_str, username, message_id))
+            ''', (user_tag, report_type, day_number, dt_str, username, message_id))
             conn.commit()
 
     def get_reports_for_date(self, date: datetime) -> Dict[str, Dict[str, Dict]]:
@@ -94,19 +92,20 @@ class ReportDatabase:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute('''
-                SELECT user_tag, report_type, submission_time, username
+                SELECT user_tag, report_type, day_number, datetime, username
                 FROM reports
-                WHERE report_date = ?
+                WHERE date(datetime) = ?
                 ORDER BY user_tag, report_type
             ''', (date_str,))
 
             reports = {}
             for row in cursor.fetchall():
-                user_tag, report_type, time_str, username = row
+                user_tag, report_type, day_number, dt_str, username = row
                 if user_tag not in reports:
                     reports[user_tag] = {}
                 reports[user_tag][report_type] = {
-                    'time': time_str,
+                    'day_number': day_number,
+                    'datetime': dt_str,
                     'username': username
                 }
 
@@ -118,7 +117,7 @@ class ReportDatabase:
         cutoff_str = cutoff_date.date().isoformat()
 
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute('DELETE FROM reports WHERE report_date < ?', (cutoff_str,))
+            conn.execute('DELETE FROM reports WHERE date(datetime) < ?', (cutoff_str,))
             conn.commit()
 
 class ReportBot:
@@ -156,30 +155,50 @@ class ReportBot:
         logger.info("Бот остановлен")
         self.scheduler.shutdown()
 
-    def parse_message(self, text: str, username: str) -> List[Tuple[str, str]]:
-        """Парсинг сообщения для извлечения отчетов"""
+    def parse_message(self, text: str, username: str) -> List[Tuple[str, str, int]]:
+        """Парсинг сообщения для извлечения отчетов с номерами дней"""
         reports = []
         words = text.lower().split()
 
-        for word in words:
-            if word.startswith('#') and len(word) > 1:
-                # Проверяем, является ли это типом отчета
-                if word[:3] in REPORT_TYPES:
-                    report_type = word[:3]
+        i = 0
+        while i < len(words):
+            word = words[i]
 
-                    # Ищем соответствующий тег участника
+            # Ищем хэштег типа отчета
+            if word.startswith('#') and len(word) > 3:
+                # Проверяем возможные типы отчетов (2 или 3 символа)
+                potential_type = None
+
+                # Сначала пробуем 3 символа
+                if word[1:4] in REPORT_TYPES:
+                    potential_type = word[1:4]
+                    number_part = word[4:]
+                # Затем пробуем 2 символа
+                elif word[1:3] in REPORT_TYPES:
+                    potential_type = word[1:3]
+                    number_part = word[3:]
+
+                if potential_type and number_part.isdigit():
+                    day_number = int(number_part)
+
+                    # Ищем следующий хэштег как участника
                     participant_tag = None
-                    for tag in words:
-                        if tag in PARTICIPANTS.values():
-                            participant_tag = tag
+                    for j in range(i + 1, len(words)):
+                        next_word = words[j]
+                        if next_word.startswith('#') and next_word in PARTICIPANTS.values():
+                            participant_tag = next_word
                             break
 
-                    # Если тег участника не найден в сообщении, используем username
+                    # Если не нашли в сообщении, используем username
                     if not participant_tag and username in PARTICIPANTS:
                         participant_tag = PARTICIPANTS[username]
 
                     if participant_tag:
-                        reports.append((report_type, participant_tag))
+                        reports.append((potential_type, participant_tag, day_number))
+                        i = j  # Пропускаем обработанный участок
+                        continue
+
+            i += 1
 
         return reports
 
@@ -194,16 +213,17 @@ class ReportBot:
         if parsed_reports:
             submission_time = message.date
 
-            for report_type, user_tag in parsed_reports:
+            for report_type, user_tag, day_number in parsed_reports:
                 self.db.save_report(
                     user_tag=user_tag,
                     report_type=report_type,
+                    day_number=day_number,
                     submission_time=submission_time,
                     username=username,
                     message_id=message.message_id
                 )
 
-                logger.info(f"Сохранен отчет: {user_tag} - {report_type} в {submission_time}")
+                logger.info(f"Сохранен отчет: {user_tag} - {report_type}{day_number} в {submission_time}")
 
     def format_report_status(self, reports: Dict, date: datetime) -> str:
         """Форматирование статуса отчетов"""
@@ -211,8 +231,9 @@ class ReportBot:
 
         message_parts = [f"📊 **Сводка отчетов за {date_str}**\n"]
 
-        # Определяем всех участников
+        # Определяем всех участников и создаем обратное сопоставление
         all_users = list(PARTICIPANTS.values())
+        tag_to_username = {v: k for k, v in PARTICIPANTS.items()}
 
         # Для каждого типа отчета
         for report_type, info in REPORT_TYPES.items():
@@ -221,32 +242,33 @@ class ReportBot:
             missing_users = []
 
             # Проверяем дедлайн для утренних отчетов
-            if report_type == '#оу':
+            if report_type == 'оу':
                 deadline = datetime.combine(date.date(), info['deadline'])
             else:
                 deadline = datetime.combine(date.date(), info['deadline'])
 
             for user_tag in all_users:
                 if user_tag in reports and report_type in reports[user_tag]:
-                    submission_time = datetime.fromisoformat(reports[user_tag][report_type]['time'])
+                    submission_time = datetime.fromisoformat(reports[user_tag][report_type]['datetime'])
+                    day_number = reports[user_tag][report_type]['day_number']
 
                     # Проверяем, был ли отчет сдан вовремя
-                    if report_type == '#оу' and submission_time.time() > info['deadline']:
-                        late_users.append(user_tag)
+                    if report_type == 'оу' and submission_time.time() > info['deadline']:
+                        late_users.append(f"{tag_to_username.get(user_tag, user_tag)}({day_number})")
                     else:
-                        submitted_users.append(user_tag)
+                        submitted_users.append(f"{tag_to_username.get(user_tag, user_tag)}({day_number})")
                 else:
                     # Определяем, пропущен ли дедлайн
-                    if report_type == '#оу':
+                    if report_type == 'оу':
                         if datetime.now().time() > info['deadline']:
-                            missing_users.append(user_tag)
+                            missing_users.append(tag_to_username.get(user_tag, user_tag))
                     else:
                         # Для вечерних отчетов дедлайн в 23:59
                         if datetime.now().date() > date.date():
-                            missing_users.append(user_tag)
+                            missing_users.append(tag_to_username.get(user_tag, user_tag))
 
             # Форматируем результат для типа отчета
-            emoji = {'#оу': '🌅', '#ос': '🏃', '#ов': '🌙', '#гсд': '⭐'}[report_type]
+            emoji = {'ос': '🏃', 'оу': '🌅', 'ов': '🌙', 'гсд': '⭐'}[report_type]
             message_parts.append(f"\n{emoji} **{info['name']}:**")
 
             if submitted_users:
@@ -279,8 +301,41 @@ class ReportBot:
         except Exception as e:
             logger.error(f"Ошибка при отправке ежедневной сводки: {e}")
 
+    async def handle_help(self, message: types.Message):
+        """Обработка команды /help"""
+        await message.reply(
+            "📋 **Формат отчетов:**\n"
+            "`#типномер #участник`\n\n"
+            "🏷️ **Типы отчетов:**\n"
+            "• `ос` - Спорт\n"
+            "• `оу` - Утренний отчёт\n" 
+            "• `ов` - Вечерний отчёт\n"
+            "• `гсд` - Главное событие дня\n\n"
+            "👥 **Участники:**\n"
+            "@A_N_yaki → #ан\n"
+            "@Dev_Jones → #ден\n"
+            "@FenolIFtalein → #никита\n"
+            "@Igor_Lucklett → #игорь\n"
+            "@Melnikova_Alena → #ал\n"
+            "@Mikhailovmind → #тор\n"
+            "@Polyhakayna0 → #поли\n"
+            "@Wlad_is_law → #в\n"
+            "@bleffucio → #арк\n"
+            "@helga_sigy → #оля\n"
+            "@mix_nastya → #нася\n"
+            "@nadezhda_efremova123 → #надя\n"
+            "@travellove_krd → #любовь\n\n"
+            "📅 **Пример:**\n"
+            "`#ос100 #тор` = спорт за 100-й день от @Mikhailovmind"
+        )
+
     async def run(self):
         """Запуск бота"""
+        # Регистрация обработчиков
+        self.dp.message.register(self.handle_start, Command("start"))
+        self.dp.message.register(self.handle_help, Command("help"))
+        self.dp.message.register(self.handle_message)
+
         try:
             await self.dp.start_polling(self.bot)
         except Exception as e:
