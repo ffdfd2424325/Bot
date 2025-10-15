@@ -301,6 +301,18 @@ class ReportBot:
         except Exception as e:
             logger.error(f"Ошибка при отправке ежедневной сводки: {e}")
 
+    async def handle_start(self, message: types.Message):
+        """Обработка команды /start"""
+        await message.reply(
+            "Привет! Отправь отчет в формате:\n"
+            "#типномер #участник\n\n"
+            "Примеры:\n"
+            "#ос100 #тор - спорт за 100-й день от @Mikhailovmind\n"
+            "#оу50 #ан - утренний отчет за 50-й день от @A_N_yaki\n"
+            "#ов25 #в - вечерний отчет за 25-й день от @Wlad_is_law\n"
+            "#гсд10 #никита - главное событие за 10-й день от @FenolIFtalein"
+        )
+
     async def handle_help(self, message: types.Message):
         """Обработка команды /help"""
         await message.reply(
