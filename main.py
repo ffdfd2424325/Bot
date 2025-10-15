@@ -331,9 +331,9 @@ class ReportBot:
 
     async def run(self):
         """Запуск бота"""
-        # Регистрация обработчиков
-        self.dp.message.register(self.handle_start, Command("start"))
-        self.dp.message.register(self.handle_help, Command("help"))
+        # Регистрация обработчиков (старый синтаксис для совместимости)
+        self.dp.message.register(self.handle_start, Command(commands=["start"]))
+        self.dp.message.register(self.handle_help, Command(commands=["help"]))
         self.dp.message.register(self.handle_message)
 
         try:
