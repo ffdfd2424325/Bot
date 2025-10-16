@@ -177,6 +177,40 @@ class ReportBot:
         except Exception as e:
             logger.error(f"Ошибка при проверке отчетов: {e}")
 
+        # Временная вставка отчетов за сегодня (удалить после использования)
+        try:
+            today = datetime.now().date()
+            existing_reports = self.db.get_reports_for_date(today)
+            if not existing_reports:
+                logger.info("Вставка временных отчетов за сегодня...")
+                temp_reports = [
+                    {'user_tag': '#нася', 'report_type': 'оу', 'day_number': 4, 'username': '@mix_nastya'},
+                    {'user_tag': '#арк', 'report_type': 'оу', 'day_number': 4, 'username': '@bleffucio'},
+                    {'user_tag': '#ан', 'report_type': 'оу', 'day_number': 4, 'username': '@A_N_yaki'},
+                    {'user_tag': '#надя', 'report_type': 'оу', 'day_number': 4, 'username': '@nadezhda_efremova123'},
+                    {'user_tag': '#никита', 'report_type': 'оу', 'day_number': 4, 'username': '@FenolIFtalein'},
+                    {'user_tag': '#любовь', 'report_type': 'оу', 'day_number': 4, 'username': '@travellove_krd'},
+                    {'user_tag': '#оля', 'report_type': 'оу', 'day_number': 4, 'username': '@helga_sigy'},
+                    {'user_tag': '#ал', 'report_type': 'оу', 'day_number': 4, 'username': '@Melnikova_Alena'},
+                    {'user_tag': '#ден', 'report_type': 'оу', 'day_number': 4, 'username': '@Dev_Jones'},
+                    {'user_tag': '#игорь', 'report_type': 'оу', 'day_number': 4, 'username': '@Igor_Lucklett'},
+                    {'user_tag': '#поли', 'report_type': 'оу', 'day_number': 4, 'username': '@Polyhakayna0'},
+                    {'user_tag': '#тор', 'report_type': 'оу', 'day_number': 4, 'username': '@Mikhailovmind'},
+                    {'user_tag': '#в', 'report_type': 'оу', 'day_number': 4, 'username': '@Wlad_is_law'},
+                ]
+                for report in temp_reports:
+                    self.db.save_report(
+                        user_tag=report['user_tag'],
+                        report_type=report['report_type'],
+                        day_number=report['day_number'],
+                        submission_time=datetime.now(),
+                        username=report['username'],
+                        message_id=99999
+                    )
+                logger.info(f"Вставлено {len(temp_reports)} временных отчетов за сегодня.")
+        except Exception as e:
+            logger.error(f"Ошибка при вставке временных отчетов: {e}")
+
         # Настройка планировщика
         self.scheduler.add_job(
             self.send_daily_report,
