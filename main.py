@@ -58,33 +58,58 @@ class ReportDatabase:
 
     def init_db(self):
         """Инициализация базы данных"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reports (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_tag TEXT NOT NULL,
-                    report_type TEXT NOT NULL,
-                    day_number INTEGER NOT NULL,
-                    datetime TEXT NOT NULL,
-                    username TEXT,
-                    message_id INTEGER,
-                    UNIQUE(user_tag, report_type, day_number)
-                )
-            ''')
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS reports (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_tag TEXT NOT NULL,
+                        report_type TEXT NOT NULL,
+                        day_number INTEGER NOT NULL,
+                        datetime TEXT NOT NULL,
+                        username TEXT,
+                        message_id INTEGER,
+                        UNIQUE(user_tag, report_type, day_number)
+                    )
+                ''')
+                conn.commit()
+                logger.info("База данных инициализирована успешно")
+        except Exception as e:
+            logger.error(f"Ошибка инициализации базы данных: {e}")
+
+    def check_db_integrity(self):
+        """Проверка целостности базы данных"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='reports'")
+                if cursor.fetchone():
+                    logger.info("Таблица reports существует")
+                    # Проверка количества записей
+                    cursor = conn.execute("SELECT COUNT(*) FROM reports")
+                    count = cursor.fetchone()[0]
+                    logger.info(f"Количество записей в базе: {count}")
+                else:
+                    logger.error("Таблица reports не найдена")
+        except Exception as e:
+            logger.error(f"Ошибка проверки базы данных: {e}")
 
     def save_report(self, user_tag: str, report_type: str, day_number: int, submission_time: datetime,
                    username: str, message_id: int):
         """Сохранение отчета в базу данных"""
         dt_str = submission_time.isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                INSERT OR REPLACE INTO reports
-                (user_tag, report_type, day_number, datetime, username, message_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (user_tag, report_type, day_number, dt_str, username, message_id))
-            conn.commit()
+        try:
+            logger.info(f"Попытка сохранения отчета: {user_tag} - {report_type}{day_number} в {dt_str}")
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT OR REPLACE INTO reports
+                    (user_tag, report_type, day_number, datetime, username, message_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (user_tag, report_type, day_number, dt_str, username, message_id))
+                conn.commit()
+                logger.info(f"Отчет успешно сохранен: {user_tag} - {report_type}{day_number}")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении отчета {user_tag} - {report_type}{day_number}: {e}")
 
     def get_reports_for_date(self, date: datetime) -> Dict[str, Dict[str, Dict]]:
         """Получение всех отчетов за указанную дату"""
@@ -138,10 +163,13 @@ class ReportBot:
         """Действия при запуске бота"""
         logger.info("Бот запущен")
 
+        # Проверка базы данных
+        self.db.check_db_integrity()
+
         # Настройка планировщика
         self.scheduler.add_job(
             self.send_daily_report,
-            CronTrigger(hour=0, minute=5),
+            CronTrigger(hour=21, minute=5),
             id='daily_report',
             replace_existing=True
         )
@@ -159,6 +187,8 @@ class ReportBot:
         """Парсинг сообщения для извлечения отчетов с номерами дней"""
         reports = []
         words = text.lower().split()
+
+        logger.info(f"Парсинг сообщения: '{text}' от пользователя '{username}'")
 
         i = 0
         while i < len(words):
@@ -180,6 +210,7 @@ class ReportBot:
 
                 if potential_type and number_part.isdigit():
                     day_number = int(number_part)
+                    logger.info(f"Найден потенциальный отчет: тип={potential_type}, день={day_number}, слово={word}")
 
                     # Ищем следующий хэштег как участника
                     participant_tag = None
@@ -187,19 +218,25 @@ class ReportBot:
                         next_word = words[j]
                         if next_word.startswith('#') and next_word in PARTICIPANTS.values():
                             participant_tag = next_word
+                            logger.info(f"Найден участник: {participant_tag}")
                             break
 
                     # Если не нашли в сообщении, используем username
                     if not participant_tag and username in PARTICIPANTS:
                         participant_tag = PARTICIPANTS[username]
+                        logger.info(f"Используем username как участника: {participant_tag}")
 
                     if participant_tag:
                         reports.append((potential_type, participant_tag, day_number))
+                        logger.info(f"Добавлен отчет: {potential_type}, {participant_tag}, день {day_number}")
                         i = j  # Пропускаем обработанный участок
                         continue
+                    else:
+                        logger.warning(f"Не найден участник для отчета: тип={potential_type}, день={day_number}")
 
             i += 1
 
+        logger.info(f"Итого распознано отчетов: {len(reports)}")
         return reports
 
     async def handle_message(self, message: types.Message):
@@ -214,20 +251,27 @@ class ReportBot:
             submission_time = message.date
 
             for report_type, user_tag, day_number in parsed_reports:
-                self.db.save_report(
-                    user_tag=user_tag,
-                    report_type=report_type,
-                    day_number=day_number,
-                    submission_time=submission_time,
-                    username=username,
-                    message_id=message.message_id
-                )
+                try:
+                    self.db.save_report(
+                        user_tag=user_tag,
+                        report_type=report_type,
+                        day_number=day_number,
+                        submission_time=submission_time,
+                        username=username,
+                        message_id=message.message_id
+                    )
 
-                logger.info(f"Сохранен отчет: {user_tag} - {report_type}{day_number} в {submission_time}")
+                    logger.info(f"Сохранен отчет: {user_tag} - {report_type}{day_number} в {submission_time}")
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке отчета {user_tag} - {report_type}{day_number}: {e}")
+
+    def escape_markdown(self, text: str) -> str:
+        """Экранирование специальных символов для Markdown"""
+        escape_chars = r'_*[]()~`>#+-=|{}.!'
+        return ''.join(f'\{char}' if char in escape_chars else char for char in text)
 
     def format_report_status(self, reports: Dict, date: datetime) -> str:
-        """Форматирование статуса отчетов"""
-        date_str = date.strftime("%d.%m.%Y")
+        date_str = self.escape_markdown(date.strftime("%d.%m.%Y"))
 
         message_parts = [f"📊 **Сводка отчетов за {date_str}**\n"]
 
@@ -254,22 +298,22 @@ class ReportBot:
 
                     # Проверяем, был ли отчет сдан вовремя
                     if report_type == 'оу' and submission_time.time() > info['deadline']:
-                        late_users.append(f"{tag_to_username.get(user_tag, user_tag)}({day_number})")
+                        late_users.append(f"{self.escape_markdown(tag_to_username.get(user_tag, user_tag))}({day_number})")
                     else:
-                        submitted_users.append(f"{tag_to_username.get(user_tag, user_tag)}({day_number})")
+                        submitted_users.append(f"{self.escape_markdown(tag_to_username.get(user_tag, user_tag))}({day_number})")
                 else:
                     # Определяем, пропущен ли дедлайн
                     if report_type == 'оу':
                         if datetime.now().time() > info['deadline']:
-                            missing_users.append(tag_to_username.get(user_tag, user_tag))
+                            missing_users.append(self.escape_markdown(tag_to_username.get(user_tag, user_tag)))
                     else:
                         # Для вечерних отчетов дедлайн в 23:59
                         if datetime.now().date() > date.date():
-                            missing_users.append(tag_to_username.get(user_tag, user_tag))
+                            missing_users.append(self.escape_markdown(tag_to_username.get(user_tag, user_tag)))
 
             # Форматируем результат для типа отчета
             emoji = {'ос': '🏃', 'оу': '🌅', 'ов': '🌙', 'гсд': '⭐'}[report_type]
-            message_parts.append(f"\n{emoji} **{info['name']}:**")
+            message_parts.append(f"\n{emoji} **{self.escape_markdown(info['name'])}:**")
 
             if submitted_users:
                 message_parts.append(f"✅ Вовремя: {', '.join(submitted_users)}")
@@ -293,7 +337,7 @@ class ReportBot:
             await self.bot.send_message(
                 chat_id=GROUP_CHAT_ID,
                 text=report_message,
-                parse_mode="Markdown"
+                parse_mode=None
             )
 
             logger.info(f"Отправлена сводка за {yesterday.strftime('%d.%m.%Y')}")
