@@ -180,7 +180,7 @@ class ReportBot:
         # Временная вставка отчетов за сегодня (удалить после использования)
         try:
             today = datetime.now().date()
-            existing_reports = self.db.get_reports_for_date(today)
+            existing_reports = self.db.get_reports_for_date(datetime.combine(today, datetime.min.time()))
             if not existing_reports:
                 logger.info("Вставка временных отчетов за сегодня...")
                 temp_reports = [
