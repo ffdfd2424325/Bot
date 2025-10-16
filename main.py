@@ -198,6 +198,7 @@ class ReportBot:
             if word.startswith('#') and len(word) > 3:
                 # Проверяем возможные типы отчетов (2 или 3 символа)
                 potential_type = None
+                number_part = None
 
                 # Сначала пробуем 3 символа
                 if word[1:4] in REPORT_TYPES:
@@ -212,14 +213,16 @@ class ReportBot:
                     day_number = int(number_part)
                     logger.info(f"Найден потенциальный отчет: тип={potential_type}, день={day_number}, слово={word}")
 
-                    # Ищем следующий хэштег как участника
+                    # Ищем следующий хэштег как участника (может быть несколько)
                     participant_tag = None
-                    for j in range(i + 1, len(words)):
+                    j = i + 1
+                    while j < len(words):
                         next_word = words[j]
                         if next_word.startswith('#') and next_word in PARTICIPANTS.values():
                             participant_tag = next_word
-                            logger.info(f"Найден участник: {participant_tag}")
+                            logger.info(f"Найден участник: {participant_tag} для типа {potential_type}")
                             break
+                        j += 1
 
                     # Если не нашли в сообщении, используем username
                     if not participant_tag and username in PARTICIPANTS:
