@@ -166,6 +166,17 @@ class ReportBot:
         # Проверка базы данных
         self.db.check_db_integrity()
 
+        # Временный лог для проверки данных в БД
+        try:
+            today = datetime.now().date().isoformat()
+            reports = self.db.get_reports_for_date(datetime.now() - timedelta(days=1))  # За вчера
+            logger.info(f"Количество отчетов за вчера ({datetime.now().date() - timedelta(days=1)}): {len(reports)}")
+            for user_tag, user_reports in reports.items():
+                for report_type, details in user_reports.items():
+                    logger.info(f"Отчет: {user_tag} - {report_type}{details['day_number']} от {details['username']}")
+        except Exception as e:
+            logger.error(f"Ошибка при проверке отчетов: {e}")
+
         # Настройка планировщика
         self.scheduler.add_job(
             self.send_daily_report,
