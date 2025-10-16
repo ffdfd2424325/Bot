@@ -197,6 +197,7 @@ class ReportBot:
                     {'user_tag': '#поли', 'report_type': 'оу', 'day_number': 4, 'username': '@Polyhakayna0'},
                     {'user_tag': '#тор', 'report_type': 'оу', 'day_number': 4, 'username': '@Mikhailovmind'},
                     {'user_tag': '#в', 'report_type': 'оу', 'day_number': 4, 'username': '@Wlad_is_law'},
+                    {'user_tag': '#надя', 'report_type': 'ос', 'day_number': 4, 'username': '@nadezhda_efremova123'},
                 ]
                 for report in temp_reports:
                     self.db.save_report(
