@@ -380,6 +380,12 @@ class ReportBot:
             yesterday = datetime.now() - timedelta(days=1)
             reports = self.db.get_reports_for_date(yesterday)
 
+            # Временный лог для проверки данных в БД сервера
+            logger.info(f"Количество отчетов за {yesterday.strftime('%d.%m.%Y')}: {len(reports)}")
+            for user_tag, user_reports in reports.items():
+                for report_type, details in user_reports.items():
+                    logger.info(f"Отчет сервера: {user_tag} - {report_type}{details['day_number']} от {details['username']}")
+
             report_message = self.format_report_status(reports, yesterday)
 
             await self.bot.send_message(
