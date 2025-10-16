@@ -271,7 +271,7 @@ class ReportBot:
     def escape_markdown(self, text: str) -> str:
         """Экранирование специальных символов для Markdown"""
         escape_chars = r'_*[]()~`>#+-=|{}.!'
-        return ''.join(f'\{char}' if char in escape_chars else char for char in text)
+        return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
 
     def format_report_status(self, reports: Dict, date: datetime) -> str:
         date_str = self.escape_markdown(date.strftime("%d.%m.%Y"))
